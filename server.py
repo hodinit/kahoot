@@ -1,65 +1,69 @@
 import socket
-import json
+import sys
+import threading
+import time
 from network_utils import trimite_mesaj, primeste_mesaj
+from election_manager import ElectionManager # Importăm logica separată
 
-def ruleaza_server_test():
-    # 1. Citim baza de date cu întrebări
-    try:
-        with open('intrebari.json', 'r', encoding='utf-8') as f:
-            intrebari = json.load(f)
-    except FileNotFoundError:
-        print("Eroare: Fișierul intrebari.json nu a fost găsit!")
-        return
-
-    # 2. Configurăm setările rețelei (Socket)
-    HOST = '127.0.0.1' # Localhost (doar pe PC-ul vostru)
-    PORT = 5000
-
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    
-    # Permite refolosirea portului imediat după ce oprim scriptul 
-    # (previne eroarea "Address already in use" când dați restart des)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    
-    server_socket.bind((HOST, PORT))
-    
-    # Ascultăm o singură conexiune pentru acest test inițial
-    server_socket.listen(1) 
-    print(f" [SERVER] Baza de date încărcată. Așteptăm jucători pe {HOST}:{PORT}...")
-
-    # 3. Așteptăm să se conecteze clientul (aici codul se oprește și așteaptă)
-    client_socket, adresa_client = server_socket.accept()
-    print(f" [SERVER] Jucător nou conectat de la: {adresa_client}")
-
-    # 4. Pregătim și trimitem prima întrebare din listă
-    prima_intrebare = intrebari[0]
-    pachet_intrebare = {
-        "tip": "INTREBARE",
-        "date": prima_intrebare
-    }
-
-    print(" [SERVER] Trimitem prima întrebare către jucător...")
-    trimite_mesaj(client_socket, pachet_intrebare)
-
-    # 5. Așteptăm răspunsul jucătorului
-    print(" [SERVER] Așteptăm răspunsul...")
-    raspuns = primeste_mesaj(client_socket)
-    
-    if raspuns:
-        print(f" [SERVER] Am primit pachetul de la client: {raspuns}")
+class ServerNode:
+    def __init__(self, node_id, port_ascultare, port_vecin_dreapta):
+        self.node_id = int(node_id)
+        self.port_ascultare = int(port_ascultare)
+        self.port_vecin_dreapta = int(port_vecin_dreapta)
+        self.host = '127.0.0.1'
         
-        # O mică validare de logică
-        if raspuns.get("alegere") == prima_intrebare["corect"]:
-            print(" [SERVER] REZULTAT: Jucătorul a răspuns corect!")
-        else:
-            print(" [SERVER] REZULTAT: Jucătorul a greșit.")
-    else:
-        print(" [SERVER] Clientul s-a deconectat fără să răspundă.")
+        # Conectăm managerul de alegeri și îi dăm metoda noastră de trimitere ca unealtă
+        self.election = ElectionManager(self.node_id, self.trimite_vecinului)
 
-    # 6. Închidem conexiunile pentru a încheia testul curat
-    client_socket.close()
-    server_socket.close()
-    print(" [SERVER] Testul s-a încheiat cu succes.")
+    def porneste(self):
+        print(f"\n[SERVER {self.node_id}] PORNIT pe portul {self.port_ascultare}.")
+        
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_socket.bind((self.host, self.port_ascultare))
+        server_socket.listen(5)
+        
+        threading.Thread(target=self.asculta_conexiuni, args=(server_socket,), daemon=True).start()
+        
+        time.sleep(2) 
+        self.election.incepe_electia() # Apelăm logica din celălalt fișier
+
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print(f"\n[SERVER {self.node_id}] Se închide...")
+
+    def asculta_conexiuni(self, server_socket):
+        while True:
+            client_socket, _ = server_socket.accept()
+            pachet = primeste_mesaj(client_socket)
+            
+            if pachet:
+                # Rutăm pachetele direct către managerul de alegeri
+                if pachet.get("tip") == "ELECTION":
+                    self.election.proceseaza_electie(pachet)
+                elif pachet.get("tip") == "COORDINATOR":
+                    self.election.proceseaza_coordonator(pachet)
+                
+            client_socket.close()
+
+    def trimite_vecinului(self, pachet):
+        """Această metodă va fi apelată din interiorul ElectionManager-ului."""
+        try:
+            sock_vecin = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock_vecin.connect((self.host, self.port_vecin_dreapta))
+            trimite_mesaj(sock_vecin, pachet)
+            sock_vecin.close()
+            return True
+        except ConnectionRefusedError:
+            print(f"[SERVER {self.node_id}] EROARE: Vecinul ({self.port_vecin_dreapta}) nu răspunde!")
+            return False
 
 if __name__ == "__main__":
-    ruleaza_server_test()
+    if len(sys.argv) != 4:
+        print("Utilizare: python server.py <ID_NOD> <PORT_ASCULTARE> <PORT_VECIN_DREAPTA>")
+        sys.exit(1)
+        
+    nod = ServerNode(sys.argv[1], sys.argv[2], sys.argv[3])
+    nod.porneste()
