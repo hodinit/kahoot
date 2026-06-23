@@ -1,0 +1,68 @@
+[
+    {
+        "id": 1,
+        "text": "Cate continente exista pe glob?",
+        "variante": {
+            "A": "5",
+            "B": "6",
+            "C": "7",
+            "D": "8"
+        },
+        "corect": "C"
+    },
+    {
+        "id": 2,
+        "text": "Care dintre urmatoarele tari NU este vecina cu Romania?",
+        "variante": {
+            "A": "Bulgaria",
+            "B": "Polonia",
+            "C": "Ungaria",
+            "D": "Serbia"
+        },
+        "corect": "B"
+    },
+    {
+        "id": 3,
+        "text": "Care tara este vecina cu Romania la est?",
+        "variante": {
+            "A": "Republica Moldova",
+            "B": "Austria",
+            "C": "Grecia",
+            "D": "Slovacia"
+        },
+        "corect": "A"
+    },
+    {
+        "id": 4,
+        "text": "Care este cel mai mare ocean de pe Pamant?",
+        "variante": {
+            "A": "Oceanul Atlantic",
+            "B": "Oceanul Indian",
+            "C": "Oceanul Arctic",
+            "D": "Oceanul Pacific"
+        },
+        "corect": "D"
+    },
+    {
+        "id": 5,
+        "text": "Cum se numesc muntii care traverseaza Romania?",
+        "variante": {
+            "A": "Muntii Alpi",
+            "B": "Muntii Anzi",
+            "C": "Muntii Carpati",
+            "D": "Muntii Himalaya"
+        },
+        "corect": "C"
+    },
+    {
+        "id": 6,
+        "text": "Care este capitala Frantei?",
+        "variante": {
+            "A": "Bordeaux",
+            "B": "Marseille",
+            "C": "Lyon",
+            "D": "Paris"
+        },
+        "corect": "D"
+    }
+]
