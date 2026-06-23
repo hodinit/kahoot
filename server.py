@@ -2,6 +2,7 @@ import socket
 import sys
 import threading
 import time
+import json
 from network_utils import trimite_mesaj, primeste_mesaj
 from election_manager import ElectionManager # Importăm logica separată
 
@@ -37,27 +38,94 @@ class ServerNode:
 
     def asculta_conexiuni(self, server_socket):
         while True:
-            client_socket, _ = server_socket.accept()
-            pachet = primeste_mesaj(client_socket)
-            
-            if pachet:
-                # Rutăm pachetele direct către managerul de alegeri
-                if pachet.get("tip") == "ELECTION":
-                    self.election.proceseaza_electie(pachet)
-                elif pachet.get("tip") == "COORDINATOR":
-                    self.election.proceseaza_coordonator(pachet)
+            try:
+                client_socket, adresa = server_socket.accept()
+                # Log de debug: vedem dacă Docker trimite conexiunea în container
+                # print(f"[SERVER {self.node_id}] Conexiune detectată de la {adresa}")
                 
-            client_socket.close()
+                pachet = primeste_mesaj(client_socket)
+                
+                if pachet:
+                    tip_mesaj = pachet.get("tip")
+                    
+                    if tip_mesaj == "ELECTION":
+                        self.election.proceseaza_electie(pachet)
+                        client_socket.close()
+                    elif tip_mesaj == "COORDINATOR":
+                        self.election.proceseaza_coordonator(pachet)
+                        client_socket.close()
+                        
+                    elif tip_mesaj == "CONECTARE_JUCATOR":
+                        if self.election.este_lider:
+                            print(f"[SERVER {self.node_id}] Jucătorul '{pachet.get('nume')}' cere acces. Răspund: PERMIS.")
+                            trimite_mesaj(client_socket, {"tip": "ACCES_PERMIS", "mesaj": "Te-ai conectat la Lider!"})
+                            threading.Thread(target=self.gestioneaza_jucator, args=(client_socket, pachet.get('nume')), daemon=True).start()
+                        else:
+                            print(f"[SERVER {self.node_id}] Jucătorul '{pachet.get('nume')}' cere acces, dar NU sunt lider. Răspund: RESPINS.")
+                            trimite_mesaj(client_socket, {"tip": "ACCES_RESPINS", "mesaj": "Nu sunt liderul."})
+                            client_socket.close()
+                else:
+                    # Dacă pachetul e None, înseamnă că s-au primit biți defecți sau o conexiune goală
+                    client_socket.close()
+                    
+            except Exception as e:
+                print(f"[SERVER {self.node_id}] EROARE CRITICĂ în thread-ul de rețea: {e}")
+                # Nu lăsăm loop-ul să se oprească, trecem la următoarea conexiune
+                continue
+
+    def gestioneaza_jucator(self, socket_jucator, nume_jucator):
+        """Aici se va desfășura logica jocului pentru fiecare jucător conectat la Lider."""
+        print(f"[JOC] Începe sesiunea pentru {nume_jucator}")
+        
+        try:
+            time.sleep(0.2) 
+            
+            with open('intrebari.json', 'r', encoding='utf-8') as f:
+                intrebari = json.load(f)
+            
+            # Luăm prima întrebare pentru test
+            date_intrebare = intrebari[0]
+            pachet_intrebare = {"tip": "INTREBARE", "date": date_intrebare}
+            trimite_mesaj(socket_jucator, pachet_intrebare)
+            
+            # Așteptăm răspunsul jucătorului
+            raspuns = primeste_mesaj(socket_jucator)
+            
+            if raspuns and raspuns.get("tip") == "RASPUNS":
+                alegere_client = raspuns.get("alegere")
+                print(f"[JOC] {nume_jucator} a ales varianta: {alegere_client}")
+                
+                # Evaluăm dacă e corect
+                este_corect = (alegere_client == date_intrebare["corect"])
+                
+                # Pregătim pachetul de răspuns de la server
+                pachet_rezultat = {
+                    "tip": "REZULTAT",
+                    "corect": este_corect,
+                    "mesaj": "Felicitări! Ai răspuns CORECT! 🎉" if este_corect else f"Greșit! Răspunsul corect era {date_intrebare['corect']}. ❌"
+                }
+                
+                # Trimitem feedback-ul înapoi la client
+                trimite_mesaj(socket_jucator, pachet_rezultat)
+                
+        except Exception as e:
+            print(f"[JOC] Conexiunea cu {nume_jucator} s-a pierdut: {e}")
+        finally:
+            socket_jucator.close()
 
     def trimite_vecinului(self, pachet):
+        """Deschide o conexiune scurtă către vecinul din dreapta și îi trimite un mesaj."""
         try:
             sock_vecin = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock_vecin.connect((self.host_vecin_dreapta, self.port_vecin_dreapta)) # <--- Modificat aici
+            # Adăugăm un timeout scurt ca să nu rămână blocat dacă vecinul e ocupat
+            sock_vecin.settimeout(2.0) 
+            sock_vecin.connect((self.host_vecin_dreapta, self.port_vecin_dreapta))
             trimite_mesaj(sock_vecin, pachet)
             sock_vecin.close()
             return True
-        except ConnectionRefusedError:
-            print(f"[SERVER {self.node_id}] EROARE: Vecinul {self.host_vecin_dreapta}:{self.port_vecin_dreapta} nu răspunde!")
+        except Exception as e: # <--- Am schimbat aici ca să prindem ORICE eroare
+            # Schimbăm în print simplu, e normal la pornire până se ridică toate containerele
+            print(f"[SERVER {self.node_id}] Notificare rețea: Vecinul nu e gata încă sau eroare temporară ({e})")
             return False
         
 if __name__ == "__main__":
