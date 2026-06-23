@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  server1:
+    build: .
+    container_name: server1
+    # Argumente: <ID> <PORT_ASCULTARE> <HOST_VECIN> <PORT_VECIN>
+    command: python server.py 10 5000 server2 5000
+    ports:
+      - "5001:5000" # Mapăm portul ca să poată și clienții de pe PC să se conecteze la el
+
+  server2:
+    build: .
+    container_name: server2
+    command: python server.py 20 5000 server3 5000
+    ports:
+      - "5002:5000"
+
+  server3:
+    build: .
+    container_name: server3
+    command: python server.py 30 5000 server1 5000
+    ports:
+      - "5003:5000"
