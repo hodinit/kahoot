@@ -14,8 +14,20 @@ class ServerNode:
         self.port_vecin_dreapta = int(port_vecin_dreapta)
 
         self.host = '0.0.0.0'
-        
+        self.stare_joc = {
+            "scoruri_globale": {},
+            "progres_jucatori": {}
+        }
+
         self.election = ElectionManager(self.node_id, self.trimite_vecinului)
+
+        try:
+            with open('intrebari.json', 'r', encoding='utf-8') as f:
+                self.intrebari = json.load(f)
+            print(f"[SERVER {self.node_id}] Baza de date a fost încărcată ({len(self.intrebari)} întrebări).")
+        except Exception as e:
+            print(f"[SERVER {self.node_id}] EROARE critică la încărcarea JSON: {e}")
+            self.intrebari = [] # Lista goală ca să nu dea crash mai târziu
 
     def porneste(self):
         print(f"\n[SERVER {self.node_id}] PORNIT pe portul {self.port_ascultare}.")
@@ -74,42 +86,65 @@ class ServerNode:
                 continue
 
     def gestioneaza_jucator(self, socket_jucator, nume_jucator):
-        """Aici se va desfășura logica jocului pentru fiecare jucător conectat la Lider."""
         print(f"[JOC] Începe sesiunea pentru {nume_jucator}")
         
         try:
             time.sleep(0.2) 
             
-            with open('intrebari.json', 'r', encoding='utf-8') as f:
-                intrebari = json.load(f)
+            # 1. Inițializăm jucătorul în memoria globală dacă e nou
+            if nume_jucator not in self.stare_joc["progres_jucatori"]:
+                self.stare_joc["progres_jucatori"][nume_jucator] = {"index_intrebare": 0}
+                self.stare_joc["scoruri_globale"][nume_jucator] = 0
+                
+            # 2. Aflăm la ce întrebare a rămas (esențial pentru reconectare mai târziu)
+            index_curent = self.stare_joc["progres_jucatori"][nume_jucator]["index_intrebare"]
             
-            # Luăm prima întrebare pentru test
-            date_intrebare = intrebari[0]
-            pachet_intrebare = {"tip": "INTREBARE", "date": date_intrebare}
-            trimite_mesaj(socket_jucator, pachet_intrebare)
-            
-            # Așteptăm răspunsul jucătorului
-            raspuns = primeste_mesaj(socket_jucator)
-            
-            if raspuns and raspuns.get("tip") == "RASPUNS":
+            # 3. Bucla jocului: Cât timp mai are întrebări de parcurs
+            while index_curent < len(self.intrebari):
+                date_intrebare = self.intrebari[index_curent]
+                
+                # Trimitem întrebarea
+                trimite_mesaj(socket_jucator, {"tip": "INTREBARE", "date": date_intrebare})
+                timp_start = time.time() # ⏱️ PORNIM CRONOMETRUL
+                
+                # Așteptăm răspunsul
+                raspuns = primeste_mesaj(socket_jucator)
+                if not raspuns or raspuns.get("tip") != "RASPUNS":
+                    print(f"[JOC] Jucătorul {nume_jucator} s-a deconectat prematur.")
+                    break # Ieșim din buclă dacă a închis fereastra
+                    
+                timp_scurs = time.time() - timp_start # ⏱️ OPRIM CRONOMETRUL
+                
                 alegere_client = raspuns.get("alegere")
-                print(f"[JOC] {nume_jucator} a ales varianta: {alegere_client}")
-                
-                # Evaluăm dacă e corect
                 este_corect = (alegere_client == date_intrebare["corect"])
+                puncte_castigate = 0
                 
-                # Pregătim pachetul de răspuns de la server
-                pachet_rezultat = {
-                    "tip": "REZULTAT",
-                    "corect": este_corect,
-                    "mesaj": "Felicitări! Ai răspuns CORECT! 🎉" if este_corect else f"Greșit! Răspunsul corect era {date_intrebare['corect']}. ❌"
-                }
+                if este_corect:
+                    # Formula de calcul: 1000 puncte maxim, scade 50 de puncte pe secundă scursă
+                    # Minimul de puncte pentru un răspuns corect este 100
+                    puncte_castigate = max(100, int(1000 - (timp_scurs * 50)))
+                    self.stare_joc["scoruri_globale"][nume_jucator] += puncte_castigate
                 
-                # Trimitem feedback-ul înapoi la client
-                trimite_mesaj(socket_jucator, pachet_rezultat)
+                # Trimitem rezultatul și punctajul
+                mesaj_feedback = f"CORECT! Ai primit {puncte_castigate} puncte. (Timp: {timp_scurs:.1f}s)" if este_corect else f"GREȘIT! Răspuns corect: {date_intrebare['corect']}."
+                trimite_mesaj(socket_jucator, {"tip": "REZULTAT", "mesaj": mesaj_feedback})
+                
+                # Salvăm progresul și trecem la următoarea
+                index_curent += 1
+                self.stare_joc["progres_jucatori"][nume_jucator]["index_intrebare"] = index_curent
+                
+                # --- Aici vom insera SINCRONIZAREA cu celelalte servere în pasul următor ---
+                time.sleep(1.5) # Pauză scurtă ca jucătorul să poată citi rezultatul pe ecran
+                
+            # 4. Dacă a terminat toate întrebările din listă, îi trimitem Clasamentul Final
+            if index_curent >= len(self.intrebari):
+                # Sortăm dicționarul de scoruri descrescător pentru a crea Top-ul
+                top_sortat = dict(sorted(self.stare_joc["scoruri_globale"].items(), key=lambda item: item[1], reverse=True))
+                trimite_mesaj(socket_jucator, {"tip": "JOC_TERMINAT", "clasament": top_sortat})
+                print(f"[JOC] {nume_jucator} a terminat jocul.")
                 
         except Exception as e:
-            print(f"[JOC] Conexiunea cu {nume_jucator} s-a pierdut: {e}")
+            print(f"[JOC] Conexiune cu {nume_jucator} s-a pierdut: {e}")
         finally:
             socket_jucator.close()
 

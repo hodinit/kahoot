@@ -36,45 +36,54 @@ def conectare_la_lider():
     return None
 
 def ruleaza_joc():
-    # 1. Găsim și ne conectăm la lider
     socket_joc = conectare_la_lider()
     if not socket_joc:
         print("[CLIENT] Eroare critică: Nu am găsit niciun Lider activ în rețea!")
         return
 
-    # 2. Dacă am ajuns aici, suntem conectați la Lider. Așteptăm întrebarea.
-    pachet_primit = primeste_mesaj(socket_joc)
-    
-    if pachet_primit and pachet_primit.get("tip") == "INTREBARE":
-        date_intrebare = pachet_primit["date"]
+    # Intrăm într-o buclă infinită pentru a primi pachete de la server
+    while True:
+        pachet_primit = primeste_mesaj(socket_joc)
         
-        print("="*40)
-        print(f" ÎNTREBARE KAHOOT: {date_intrebare['text']}")
-        print("-" * 40)
-        for litera, varianta in date_intrebare["variante"].items():
-            print(f"   {litera}) {varianta}")
-        print("="*40)
-
-        alegere = input("\n 👉 Răspunsul tău (A, B, C): ").strip().upper()
-
-        pachet_raspuns = {
-            "tip": "RASPUNS",
-            "alegere": alegere
-        }
-        trimite_mesaj(socket_joc, pachet_raspuns)
-        print("[CLIENT] Răspuns trimis! Așteptăm serverul...")
-
-        pachet_rezultat = primeste_mesaj(socket_joc)
+        if not pachet_primit:
+            print("\n[CLIENT] Conexiunea cu serverul s-a întrerupt brusc!")
+            break
+            
+        tip_mesaj = pachet_primit.get("tip")
         
-        if pachet_rezultat and pachet_rezultat.get("tip") == "REZULTAT":
+        if tip_mesaj == "INTREBARE":
+            date_intrebare = pachet_primit["date"]
+            print("\n" + "="*40)
+            print(f" ÎNTREBARE: {date_intrebare['text']}")
+            print("-" * 40)
+            for litera, varianta in date_intrebare["variante"].items():
+                print(f"   {litera}) {varianta}")
             print("="*40)
-            print(f" REZULTAT JOC: {pachet_rezultat.get('mesaj')}")
-            print("="*40)
-        else:
-            print("[CLIENT] Serverul a închis conexiunea fără să trimită rezultatul.")
-        
+
+            alegere = input("\n 👉 Răspunsul tău (A, B, C): ").strip().upper()
+            trimite_mesaj(socket_joc, {"tip": "RASPUNS", "alegere": alegere})
+            print("[CLIENT] Răspuns trimis! Evaluăm...")
+            
+        elif tip_mesaj == "REZULTAT":
+            print("\n" + "-"*40)
+            print(f" 🎯 {pachet_primit.get('mesaj')}")
+            print("-" * 40)
+            print("Așteaptă următoarea întrebare...")
+            
+        elif tip_mesaj == "JOC_TERMINAT":
+            print("\n" + "#"*40)
+            print(" 🎉 JOCUL S-A TERMINAT! CLASAMENT FINAL 🎉")
+            print("#"*40)
+            loc = 1
+            clasament = pachet_primit.get("clasament", {})
+            for nume, scor in clasament.items():
+                print(f"  {loc}. {nume} - {scor} puncte")
+                loc += 1
+            print("#"*40)
+            break # Ieșim din buclă pentru că jocul e gata
+            
     socket_joc.close()
-    print("[CLIENT] Joc încheiat.")
+    print("\n[CLIENT] Sesiune încheiată.")
 
 if __name__ == "__main__":
     ruleaza_joc()
