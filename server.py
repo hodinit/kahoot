@@ -103,67 +103,80 @@ class ServerNode:
         try:
             time.sleep(0.2) 
             
-            # 1. Inițializăm jucătorul în memoria globală dacă e nou
+            # 1. Inițializăm jucătorul în memorie (implicit NU a terminat)
             if nume_jucator not in self.stare_joc["progres_jucatori"]:
-                self.stare_joc["progres_jucatori"][nume_jucator] = {"index_intrebare": 0}
+                self.stare_joc["progres_jucatori"][nume_jucator] = {
+                    "index_intrebare": 0,
+                    "terminat": False  # <--- NOU: Flag pentru sala de așteptare
+                }
                 self.stare_joc["scoruri_globale"][nume_jucator] = 0
                 
-            # 2. Aflăm la ce întrebare a rămas (esențial pentru reconectare mai târziu)
             index_curent = self.stare_joc["progres_jucatori"][nume_jucator]["index_intrebare"]
             
-            # 3. Bucla jocului: Cât timp mai are întrebări de parcurs
+            # 2. Bucla de întrebări
             while index_curent < len(self.intrebari):
                 date_intrebare = self.intrebari[index_curent]
                 
-                # Trimitem întrebarea
                 trimite_mesaj(socket_jucator, {"tip": "INTREBARE", "date": date_intrebare})
-                timp_start = time.time() # ⏱️ PORNIM CRONOMETRUL
+                timp_start = time.time()
                 
-                # Așteptăm răspunsul
                 raspuns = primeste_mesaj(socket_jucator)
                 if not raspuns or raspuns.get("tip") != "RASPUNS":
                     print(f"[JOC] Jucătorul {nume_jucator} s-a deconectat prematur.")
-                    break # Ieșim din buclă dacă a închis fereastra
+                    break
                     
-                timp_scurs = time.time() - timp_start # ⏱️ OPRIM CRONOMETRUL
-                
+                timp_scurs = time.time() - timp_start
                 alegere_client = raspuns.get("alegere")
                 este_corect = (alegere_client == date_intrebare["corect"])
                 puncte_castigate = 0
                 
                 if este_corect:
-                    # Formula de calcul: 1000 puncte maxim, scade 50 de puncte pe secundă scursă
-                    # Minimul de puncte pentru un răspuns corect este 100
                     puncte_castigate = max(100, int(1000 - (timp_scurs * 50)))
                     self.stare_joc["scoruri_globale"][nume_jucator] += puncte_castigate
                 
-                # Trimitem rezultatul și punctajul
-                mesaj_feedback = f"CORECT! Ai primit {puncte_castigate} puncte. (Timp: {timp_scurs:.1f}s)" if este_corect else f"GREȘIT! Răspuns corect: {date_intrebare['corect']}."
+                mesaj_feedback = f"CORECT! +{puncte_castigate}p (Timp: {timp_scurs:.1f}s)" if este_corect else f"GREȘIT! Răspunsul corect era {date_intrebare['corect']}."
                 trimite_mesaj(socket_jucator, {"tip": "REZULTAT", "mesaj": mesaj_feedback})
                 
-                # Salvăm progresul și trecem la următoarea
                 index_curent += 1
                 self.stare_joc["progres_jucatori"][nume_jucator]["index_intrebare"] = index_curent
                 
-                # --- NOU: Trimitem backup-ul către celelalte servere ---
-                pachet_sync = {
-                    "tip": "SYNC_STARE",
-                    "stare_joc": self.stare_joc
-                }
-                # Lansăm pe inel într-un thread separat ca să nu înghețe jocul clientului
+                # Sincronizăm starea pe inel la fiecare pas
+                pachet_sync = {"tip": "SYNC_STARE", "stare_joc": self.stare_joc}
                 threading.Thread(target=self.trimite_vecinului, args=(pachet_sync,), daemon=True).start()
-                # --- Aici vom insera SINCRONIZAREA cu celelalte servere în pasul următor ---
-                time.sleep(1.5) # Pauză scurtă ca jucătorul să poată citi rezultatul pe ecran
                 
-            # 4. Dacă a terminat toate întrebările din listă, îi trimitem Clasamentul Final
+                time.sleep(2.0) # Oferim timp utilizatorului să citească rezultatul în GUI
+                
+            # 3. --- SALA DE AȘTEPTARE ---
             if index_curent >= len(self.intrebari):
-                # Sortăm dicționarul de scoruri descrescător pentru a crea Top-ul
+                self.stare_joc["progres_jucatori"][nume_jucator]["terminat"] = True
+                
+                # Trimitem din nou sync pe inel ca toți followerii să știe că h a terminat
+                pachet_sync = {"tip": "SYNC_STARE", "stare_joc": self.stare_joc}
+                threading.Thread(target=self.trimite_vecinului, args=(pachet_sync,), daemon=True).start()
+                
+                # Notificăm interfața grafică a clientului să treacă pe ecranul de așteptare
+                trimite_mesaj(socket_jucator, {"tip": "ASTEAPTA", "mesaj": "Ai terminat! Așteptăm restul jucătorilor..."})
+                
+                # Blocăm thread-ul într-un loop până când TOȚI au terminat = True
+                print(f"[LOBBY] {nume_jucator} este în sala de așteptare...")
+                while True:
+                    toti_au_terminat = True
+                    for nume, info in self.stare_joc["progres_jucatori"].items():
+                        if not info.get("terminat", False):
+                            toti_au_terminat = False
+                            break
+                    
+                    if toti_au_terminat:
+                        break
+                    time.sleep(1.0) # Verificăm secundă de secundă
+                
+                # 4. Trimiterea clasamentului final (Toți trec în același timp aici)
                 top_sortat = dict(sorted(self.stare_joc["scoruri_globale"].items(), key=lambda item: item[1], reverse=True))
                 trimite_mesaj(socket_jucator, {"tip": "JOC_TERMINAT", "clasament": top_sortat})
-                print(f"[JOC] {nume_jucator} a terminat jocul.")
+                print(f"[JOC] Tranzacție finalizată pentru {nume_jucator}. Top trimis.")
                 
         except Exception as e:
-            print(f"[JOC] Conexiune cu {nume_jucator} s-a pierdut: {e}")
+            print(f"[JOC] Conexiune pierdută cu {nume_jucator}: {e}")
         finally:
             socket_jucator.close()
 
