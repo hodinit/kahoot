@@ -66,6 +66,18 @@ class ServerNode:
                     elif tip_mesaj == "COORDINATOR":
                         self.election.proceseaza_coordonator(pachet)
                         client_socket.close()
+                    elif tip_mesaj == "SYNC_STARE":
+                        if not self.election.este_lider: # Doar followerii ascultă asta
+                            print(f"[SERVER {self.node_id}] Am primit backup-ul de memorie de la Lider.")
+                            self.stare_joc = pachet.get("stare_joc", self.stare_joc)
+                            # Dăm pachetul mai departe pe inel ca să ajungă și la celălalt follower
+                            self.trimite_vecinului(pachet)
+                        client_socket.close()
+                    elif tip_mesaj == "LIDER_MORT":
+                        if not self.election.in_electie:
+                            print(f"\n[SERVER {self.node_id}] 🚨 ALERTĂ CLIENT: Liderul e mort! Reîncep alegerile!")
+                            self.election.incepe_electia()
+                        client_socket.close()
                         
                     elif tip_mesaj == "CONECTARE_JUCATOR":
                         if self.election.este_lider:
@@ -133,6 +145,13 @@ class ServerNode:
                 index_curent += 1
                 self.stare_joc["progres_jucatori"][nume_jucator]["index_intrebare"] = index_curent
                 
+                # --- NOU: Trimitem backup-ul către celelalte servere ---
+                pachet_sync = {
+                    "tip": "SYNC_STARE",
+                    "stare_joc": self.stare_joc
+                }
+                # Lansăm pe inel într-un thread separat ca să nu înghețe jocul clientului
+                threading.Thread(target=self.trimite_vecinului, args=(pachet_sync,), daemon=True).start()
                 # --- Aici vom insera SINCRONIZAREA cu celelalte servere în pasul următor ---
                 time.sleep(1.5) # Pauză scurtă ca jucătorul să poată citi rezultatul pe ecran
                 
@@ -149,18 +168,38 @@ class ServerNode:
             socket_jucator.close()
 
     def trimite_vecinului(self, pachet):
-        """Deschide o conexiune scurtă către vecinul din dreapta și îi trimite un mesaj."""
+        # Lista tuturor host-urilor posibile din Docker
+        toate_containerele = ['server1', 'server2', 'server3']
+        
         try:
+            # Încercăm vecinul normal
             sock_vecin = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # Adăugăm un timeout scurt ca să nu rămână blocat dacă vecinul e ocupat
-            sock_vecin.settimeout(2.0) 
+            sock_vecin.settimeout(1.5)
             sock_vecin.connect((self.host_vecin_dreapta, self.port_vecin_dreapta))
             trimite_mesaj(sock_vecin, pachet)
             sock_vecin.close()
             return True
-        except Exception as e: # <--- Am schimbat aici ca să prindem ORICE eroare
-            # Schimbăm în print simplu, e normal la pornire până se ridică toate containerele
-            print(f"[SERVER {self.node_id}] Notificare rețea: Vecinul nu e gata încă sau eroare temporară ({e})")
+        except Exception as e:
+            print(f"[SERVER {self.node_id}] Vecinul principal e MORT! Caut alt server viu...")
+            
+            # Deducem numele nostru ca să nu ne trimitem singuri mesaje
+            numele_meu = f"server{int(self.node_id)//10}" 
+            
+            # Căutăm următorul server viu
+            for host_alternativ in toate_containerele:
+                if host_alternativ != numele_meu and host_alternativ != self.host_vecin_dreapta:
+                    try:
+                        sock_alt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock_alt.settimeout(1.5)
+                        sock_alt.connect((host_alternativ, self.port_vecin_dreapta))
+                        trimite_mesaj(sock_alt, pachet)
+                        sock_alt.close()
+                        print(f"[SERVER {self.node_id}] Am sărit nodul mort! Pachet trimis la {host_alternativ}.")
+                        return True
+                    except:
+                        pass # E mort și ăsta, trecem la următorul
+            
+            print(f"[SERVER {self.node_id}] EROARE FATALĂ: Eu sunt singurul server rămas viu.")
             return False
         
 if __name__ == "__main__":

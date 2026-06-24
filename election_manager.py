@@ -16,7 +16,14 @@ class ElectionManager:
                 "tip": "ELECTION",
                 "lista_id": [self.node_id]
             }
-            self.trimite_la_vecin(pachet)
+            succes = self.trimite_la_vecin(pachet)
+            
+            # --- SOLUȚIA PENTRU ULTIMUL SUPRAVIEȚUITOR ---
+            if not succes:
+                print(f"[ELECȚIE {self.node_id}] Toți ceilalți sunt morți! Sunt singurul supraviețuitor. MĂ DECLAR LIDER!")
+                self.este_lider = True
+                self.id_lider_curent = self.node_id
+                self.in_electie = False
 
     def proceseaza_electie(self, pachet):
         lista_id = pachet.get("lista_id", [])
