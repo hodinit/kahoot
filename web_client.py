@@ -6,17 +6,14 @@ from flask_socketio import SocketIO
 from network_utils import trimite_mesaj, primeste_mesaj
 
 app = Flask(__name__)
-# Forțăm folosirea thread-urilor standard (evită erori pe Windows)
 socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*") 
 
 PORTURI_SERVERE = [5001, 5002, 5003]
 HOST_DOCKER = '127.0.0.1'
 
-# Ținem minte ce conexiune de Docker corespunde fiecărui utilizator web
 clienti_web = {}
 
 def gaseste_lider(nume):
-    """Caută liderul în Docker, fix ca în vechiul client.py"""
     while True:
         porturi_vii = []
         for port in PORTURI_SERVERE:
@@ -30,7 +27,7 @@ def gaseste_lider(nume):
                 else:
                     porturi_vii.append(port)
                     sock.close()
-            except:
+            except Exception:
                 sock.close()
         
         if porturi_vii:
@@ -39,23 +36,23 @@ def gaseste_lider(nume):
                 sock_alerta.connect((HOST_DOCKER, porturi_vii[0]))
                 trimite_mesaj(sock_alerta, {"tip": "LIDER_MORT"})
                 sock_alerta.close()
-            except: pass
+            except Exception: 
+                pass
             time.sleep(3)
         else:
             return None
 
 def asculta_docker(sid, nume):
-    """Rulează în fundal pentru fiecare jucător, ascultând Liderul"""
     sock = gaseste_lider(nume)
     if not sock:
-        socketio.emit('schimba_ecran', {'ecran': 'eroare', 'mesaj': 'Serverele sunt picate!'}, to=sid)
+        socketio.emit('schimba_ecran', {'ecran': 'eroare', 'mesaj': 'Nodurile de backend sunt indisponibile.'}, to=sid)
         return
 
     clienti_web[sid]['tcp_socket'] = sock
 
     while True:
         if sid not in clienti_web:
-            break # Jucătorul a închis browserul
+            break
 
         try:
             pachet = primeste_mesaj(clienti_web[sid]['tcp_socket'])
@@ -72,12 +69,13 @@ def asculta_docker(sid, nume):
             elif tip == "JOC_TERMINAT":
                 socketio.emit('schimba_ecran', {'ecran': 'clasament', 'clasament': pachet['clasament']}, to=sid)
                 break
-        except:
-            # --- MAGIA FAILOVER-ULUI: Trimisă direct pe web ---
-            socketio.emit('schimba_ecran', {'ecran': 'asteptare', 'mesaj': '🚨 Lider picat! Reconectare...'}, to=sid)
+        except Exception:
+            socketio.emit('schimba_ecran', {'ecran': 'asteptare', 'mesaj': 'Conexiune pierduta. Se reinitiaza procesul de failover...'}, to=sid)
             if sid in clienti_web and clienti_web[sid].get('tcp_socket'):
-                try: clienti_web[sid]['tcp_socket'].close()
-                except: pass
+                try: 
+                    clienti_web[sid]['tcp_socket'].close()
+                except Exception: 
+                    pass
             
             time.sleep(3)
             sock_nou = gaseste_lider(nume)
@@ -85,7 +83,6 @@ def asculta_docker(sid, nume):
                 break
             clienti_web[sid]['tcp_socket'] = sock_nou
 
-# --- Rute Web ---
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -103,7 +100,8 @@ def handle_raspuns(data):
     if sid in clienti_web and clienti_web[sid]['tcp_socket']:
         try:
             trimite_mesaj(clienti_web[sid]['tcp_socket'], {"tip": "RASPUNS", "alegere": data['alegere']})
-        except: pass
+        except Exception: 
+            pass
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -111,10 +109,11 @@ def handle_disconnect():
     if sid in clienti_web:
         sock = clienti_web[sid].get('tcp_socket')
         if sock:
-            try: sock.close()
-            except: pass
+            try: 
+                sock.close()
+            except Exception: 
+                pass
         del clienti_web[sid]
 
 if __name__ == '__main__':
-    # Rulăm pe 0.0.0.0 ca să poți accesa de pe telefon/alt laptop prin Wi-Fi!
     socketio.run(app, host='0.0.0.0', port=5000)
