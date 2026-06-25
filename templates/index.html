@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed Kahoot</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+    <div class="container">
+        
+        <div id="ecran-login" class="ecran activ">
+            <h1>Kahoot</h1>
+            <input type="text" id="nume_jucator" placeholder="Numele tau">
+            <button onclick="intraInJoc()">Intra in joc</button>
+        </div>
+
+        <div id="ecran-intrebare" class="ecran">
+            <h2 id="text_intrebare"></h2>
+            <div id="variante_container"></div>
+        </div>
+
+        <div id="ecran-rezultat" class="ecran">
+            <h2 id="text_rezultat"></h2>
+        </div>
+
+        <div id="ecran-asteptare" class="ecran">
+            <h2 id="text_asteptare">Asteptam...</h2>
+        </div>
+
+        <div id="ecran-clasament" class="ecran">
+            <h1>Clasament Final</h1>
+            <ul id="lista_clasament"></ul>
+        </div>
+        
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

@@ -4,10 +4,9 @@ services:
   server1:
     build: .
     container_name: server1
-    # Argumente: <ID> <PORT_ASCULTARE> <HOST_VECIN> <PORT_VECIN>
     command: python server.py 10 5000 server2 5000
     ports:
-      - "5001:5000" # Mapăm portul ca să poată și clienții de pe PC să se conecteze la el
+      - "5001:5000"
 
   server2:
     build: .

@@ -1,9 +1,7 @@
 class ElectionManager:
     def __init__(self, node_id, functie_trimitere):
         self.node_id = node_id
-        self.trimite_la_vecin = functie_trimitere # Funcția primită de la server
-        
-        # Stările specifice algoritmului
+        self.trimite_la_vecin = functie_trimitere
         self.este_lider = False
         self.id_lider_curent = None
         self.in_electie = False
@@ -11,27 +9,26 @@ class ElectionManager:
     def incepe_electia(self):
         if not self.in_electie:
             self.in_electie = True
-            print(f"[ELECȚIE {self.node_id}] ---- INIȚIAZĂ ELECȚIE ----")
+            print(f"[ELECTIE {self.node_id}] Initiaza proces de electie.")
             pachet = {
                 "tip": "ELECTION",
                 "lista_id": [self.node_id]
             }
             succes = self.trimite_la_vecin(pachet)
             
-            # --- SOLUȚIA PENTRU ULTIMUL SUPRAVIEȚUITOR ---
             if not succes:
-                print(f"[ELECȚIE {self.node_id}] Toți ceilalți sunt morți! Sunt singurul supraviețuitor. MĂ DECLAR LIDER!")
+                print(f"[ELECTIE {self.node_id}] Niciun alt nod activ detectat. Nodul curent declarat lider.")
                 self.este_lider = True
                 self.id_lider_curent = self.node_id
                 self.in_electie = False
 
     def proceseaza_electie(self, pachet):
         lista_id = pachet.get("lista_id", [])
-        print(f"[ELECȚIE {self.node_id}] Pachet ELECTION primit. Lista: {lista_id}")
+        print(f"[ELECTIE {self.node_id}] Pachet ELECTION primit. Lista: {lista_id}")
         
         if self.node_id in lista_id:
             noul_lider_id = max(lista_id)
-            print(f"[ELECȚIE {self.node_id}] Cercul e complet. Lider maxim: {noul_lider_id}.")
+            print(f"[ELECTIE {self.node_id}] Inel complet. Lider determinat: {noul_lider_id}")
             
             pachet_coord = {
                 "tip": "COORDINATOR",
@@ -55,10 +52,10 @@ class ElectionManager:
         
         if lider_anuntat == self.node_id:
             self.este_lider = True
-            print(f"\n[ELECȚIE {self.node_id}] >>> EU SUNT NOUL LIDER! <<<")
+            print(f"[ELECTIE {self.node_id}] Acest nod a preluat rolul de lider.")
         else:
             self.este_lider = False
-            print(f"\n[ELECȚIE {self.node_id}] Noul lider este: {lider_anuntat}")
+            print(f"[ELECTIE {self.node_id}] Lider curent setat la: {lider_anuntat}")
 
         if self.node_id not in vizitate:
             vizitate.append(self.node_id)
